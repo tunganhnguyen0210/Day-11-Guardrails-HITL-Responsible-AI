@@ -28,6 +28,25 @@ from core.config import ALLOWED_TOPICS, BLOCKED_TOPICS
 # - "act as (a |an )?unrestricted"
 # ============================================================
 
+# Module-level so the patterns can be reused by get_injection_match() below
+# (e.g. for audit logs that report *which* pattern triggered a block).
+INJECTION_PATTERNS = [
+    # TODO: Add at least 5 regex patterns
+    # Example:
+    # r"ignore (all )?(previous|above) instructions",
+    r"ignore (all |any )?(previous|above|prior) (instructions|directives|prompts)",
+    r"forget (your |all )?(instructions|prompts|rules)",
+    r"disregard (all |any )?(prior|previous|above) (directives|instructions)",
+    r"you are now",
+    r"system prompt",
+    r"reveal (your |the )?(instructions|prompt|system prompt|config)",
+    r"pretend (that )?you are",
+    r"act as (a |an )?(unrestricted|jailbroken|dan)",
+    r"override (your )?(system prompt|instructions|rules)",
+    r"b[ỏo]\s*qua\s*(m[ọo]i|t[ấa]t c[ảa])\s*(h[ưu][ớo]ng d[ẫa]n|ch[ỉi] th[ịi])",
+]
+
+
 def detect_injection(user_input: str) -> bool:
     """Detect prompt injection patterns in user input.
 
@@ -37,16 +56,22 @@ def detect_injection(user_input: str) -> bool:
     Returns:
         True if injection detected, False otherwise
     """
-    INJECTION_PATTERNS = [
-        # TODO: Add at least 5 regex patterns
-        # Example:
-        # r"ignore (all )?(previous|above) instructions",
-    ]
-
     for pattern in INJECTION_PATTERNS:
         if re.search(pattern, user_input, re.IGNORECASE):
             return True
     return False
+
+
+def get_injection_match(user_input: str) -> str | None:
+    """Return the first INJECTION_PATTERNS regex that matches, or None.
+
+    Used by the audit log / security reports to show *which* pattern
+    triggered a block (detect_injection() only returns True/False).
+    """
+    for pattern in INJECTION_PATTERNS:
+        if re.search(pattern, user_input, re.IGNORECASE):
+            return pattern
+    return None
 
 
 # ============================================================
@@ -75,7 +100,13 @@ def topic_filter(user_input: str) -> bool:
     # 2. If input doesn't contain any allowed topic -> return True
     # 3. Otherwise -> return False (allow)
 
-    pass  # Replace with your implementation
+    if any(topic in input_lower for topic in BLOCKED_TOPICS):
+        return True
+
+    if not any(topic in input_lower for topic in ALLOWED_TOPICS):
+        return True
+
+    return False
 
 
 # ============================================================
@@ -135,7 +166,21 @@ class InputGuardrailPlugin(base_plugin.BasePlugin):
         #    - If True: increment blocked_count, return self._block_response("...")
         # 3. If both are False: return None (let message through)
 
-        pass  # Replace with your implementation
+        if detect_injection(text):
+            self.blocked_count += 1
+            return self._block_response(
+                "I cannot process that request. I'm here to help with banking "
+                "questions only."
+            )
+
+        if topic_filter(text):
+            self.blocked_count += 1
+            return self._block_response(
+                "I'm a VinBank assistant and can only help with banking-related "
+                "questions, such as accounts, transactions, loans, or interest rates."
+            )
+
+        return None
 
 
 # ============================================================
